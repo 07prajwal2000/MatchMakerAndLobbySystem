@@ -2,8 +2,12 @@ import axios from "axios";
 import { useEffect, useState } from "react";
 import { io } from "socket.io-client";
 
-const clientSock = io("http://localhost:3000", {
+const PORT = 8000;
+
+const clientSock = io(`http://localhost:${PORT}`, {
 	autoConnect: false,
+	timeout: 8_000,
+	transports: ['websocket']
 });
 
 type MatchSearchStatus = "NOT STARTED" | "FINDING" | "FOUND" | "EXITING";
@@ -49,7 +53,7 @@ function App() {
 	async function onFindMatchBtnClicked() {
 		setMatchSearchStatus("FINDING");
 		const response = await axios.get(
-			"http://localhost:3000/generate-token"
+			`http://localhost:${PORT}/generate-token`
 		);
 		const token = response.data.token as string;
 		console.log("Token:", token);

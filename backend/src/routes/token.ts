@@ -6,7 +6,6 @@ const tokenRouter = express.Router();
 
 tokenRouter.get("/generate-token", (req, res) => {
   const token = generateToken();
-
   return res.json({
     token: token.value,
     expiry: token.expiry,

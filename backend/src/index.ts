@@ -16,7 +16,9 @@ async function main() {
   const socketio = new Server(server, {
     cors: {
       origin: 'http://localhost:5173',
-      methods: ['GET', 'POST', 'PUT', 'DELETE']
+      methods: '*',
+      allowedHeaders: "*",
+      credentials: true
     }
   });
 

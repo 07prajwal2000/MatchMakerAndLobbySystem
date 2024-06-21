@@ -1,0 +1,5 @@
+:8000 {
+    reverse_proxy host.docker.internal:3000 host.docker.internal:3001 {
+        lb_policy round_robin
+    }
+}

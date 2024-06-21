@@ -1,0 +1,7 @@
+entryPoints:
+  web:
+    address: :8000
+
+providers:
+  file:
+    directory: /app

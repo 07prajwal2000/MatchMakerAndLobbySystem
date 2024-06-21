@@ -1,0 +1,13 @@
+http:
+  routers:
+    # Define a connection between requests and services
+    matchmaker:
+      rule: "Host(`localhost`)"
+      service: matchmaker-svc
+
+  services:
+    matchmaker-svc:
+      loadBalancer:
+        servers:
+        - url: "http://host.docker.internal:3000"
+        - url: "http://host.docker.internal:3001"
