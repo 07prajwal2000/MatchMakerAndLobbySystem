@@ -1,12 +1,17 @@
+import { GenerateTokenRequest } from "../schemas/token";
 import { hashString } from "./hash";
 
 
-export function generateToken() {
+export function generateToken(request: GenerateTokenRequest) {
   const expiry = Math.round(Date.now()) + (1000 * 60 * 10);
 
+  let matchKey = request.matchType + "_" + request.region + "_" + request.skillRange;
+  matchKey = Buffer.from(matchKey, 'utf8').toString('base64').replaceAll('=', '');
+  
   const tokenData = JSON.stringify({
     userId: Math.round(Math.random() * 100_00),
     expiry,
+    matchKey
   });
   const token = Buffer.from(tokenData, 'utf8').toString('hex');
   const hash = hashString(token);
@@ -14,7 +19,8 @@ export function generateToken() {
   const finalToken = token.length + '$' + token + hash
   return {
     value: finalToken,
-    expiry
+    expiry,
+    matchKey
   }
 }
 

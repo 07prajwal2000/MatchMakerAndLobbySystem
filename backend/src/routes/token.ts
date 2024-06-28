@@ -1,15 +1,27 @@
-import express from 'express';
+import express, {Request} from 'express';
 import bodyparser from 'body-parser';
 import { generateToken, validateToken } from '../lib/token';
+import { GenerateTokenRequest, generateTokenRequestSchema } from '../schemas/token';
 
 const tokenRouter = express.Router();
 
-tokenRouter.get("/generate-token", (req, res) => {
-  const token = generateToken();
+
+tokenRouter.post("/generate-token", bodyparser.json(), (req: Request<any, any, GenerateTokenRequest>, res) => {
+  const parser = generateTokenRequestSchema.safeParse(req.body);
+  if (!parser.success) {
+    console.log(parser.error);
+    return res
+      .status(400)
+      .json({
+        message: "Invalid body"
+      });
+  }
+  const token = generateToken(req.body);
   return res.json({
     token: token.value,
     expiry: token.expiry,
-    expiryType: 'ms'
+    expiryType: 'ms',
+    matchKey: token.matchKey
   })
 });
 
