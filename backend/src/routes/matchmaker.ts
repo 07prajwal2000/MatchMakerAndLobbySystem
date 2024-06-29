@@ -1,68 +1,96 @@
+import crypto from "crypto";
 import { Socket } from "socket.io";
 import { validateToken } from "../lib/token";
-import { redis, redisPubSubClient } from "../lib/redis";
+import {
+	AckPolicy,
+	Consumer,
+	JetStreamClient,
+	JetStreamManager,
+	NatsConnection,
+	StringCodec,
+	connect,
+} from "nats";
+import Redis from "ioredis";
 
-const waitingusers: { [userId: number]: (matchToken: string) => void } = {};
-const queueName = `WAITING-QUEUE-1`;
-const queueSetName = `WAITING-QUEUE-1-SET`;
-const userNotFoundPubSubQueue = `USER_NOT_FOUND_PUB_SUB`;
-const maxPlayersInMatch = 3;
+const waitingusers: { [userId: number]: (matchDetails: any) => void } = {};
 let initialized = false;
+let natsClient: NatsConnection = null!;
+let jetstream: JetStreamClient = null!;
+const redis = new Redis();
+const instanceId = crypto.randomUUID().substring(0, 15).replaceAll("-", "");
+const abortSignal = new AbortController();
+const consumers: Consumer[] = [];
+const stringCodec = StringCodec();
+const streamName = "match-maker-pub";
 
-export function initMatchmaker() {
+process.on("SIGTERM", abortSignal.abort);
+process.on("SIGINT", abortSignal.abort);
+process.on("SIGQUIT", abortSignal.abort);
+
+abortSignal.signal.addEventListener(
+	"abort",
+	async () => {
+		console.log("Server stopped");
+		for (const c of consumers) {
+			c.delete();
+		}
+		await natsClient.drain();
+		await natsClient.close();
+	},
+	{ once: true }
+);
+
+export async function initMatchmaker() {
 	if (initialized) {
 		console.error("Match maker is already initialized");
 		return;
 	}
-	redisPubSubClient.subscribe(userNotFoundPubSubQueue);
-	redisPubSubClient.on('message', (channel, value) => {
-		if (channel != userNotFoundPubSubQueue) return;
-		console.log("User id published:", value);
-		const jsonData = JSON.parse(value);
-		if (!(jsonData.id in waitingusers)) return;
-		waitingusers[jsonData.id](jsonData.matchToken);
-		delete waitingusers[jsonData.id];
+	console.log("Match maker started. Instance ID:", instanceId);
+	await redis.ping();
+	natsClient = await connect({ servers: ["localhost:4222"] });
+	jetstream = natsClient.jetstream();
+	const manager = await jetstream.jetstreamManager();
+
+	// await manager.streams.delete(streamName); // remove stream
+
+	await manager.streams.add({
+		name: streamName,
+		description: "Match-maker publisher",
+		subjects: ["match-maker.waiting-queue.>", "match-maker.match-found.>"], // wildcard (>) -> add, delete. 2nd subject = (>) instance id
 	});
-
+	await initMatchMakerConsumer(manager);
 	initialized = true;
-	setInterval(async () => {
-		const length = await redis.llen(queueName);
-		if (length < maxPlayersInMatch) return;
+}
 
-		console.log("Total players in queue:", length);
+async function initMatchMakerConsumer(manager: JetStreamManager) {
+	const consumerName = `matchfound_receiver_${instanceId}`;
+	await manager.consumers.add(streamName, {
+		ack_policy: AckPolicy.Explicit,
+		durable_name: consumerName,
+		filter_subject: `match-maker.match-found.${instanceId}`,
+	});
+	const consumer = await jetstream.consumers.get(streamName, consumerName);
+	processMatchMakerMessages(consumer);
+}
 
-		for (let i = 0; i < length; i += maxPlayersInMatch) {
-			const users = await redis.lrange(queueName, 0, maxPlayersInMatch);
-
-			const matchToken = generateMatchToken();
-			const transaction = redis.multi().srem(queueSetName, users);
-
-			for (let id of users) {
-				const userId = parseInt(id);
-				if (!(userId in waitingusers)) {
-					redis.publish(
-						userNotFoundPubSubQueue,
-						JSON.stringify({ id, matchToken })
-					);
-				}
-				waitingusers[userId] && waitingusers[userId](matchToken);
-				delete waitingusers[userId];
-				const matchKey = `IN_MATCH-${id}`;
-				transaction.lrem(queueName, 1, id);
-				transaction.set(matchKey, matchToken);
-				transaction.expire(matchKey, 70);
-			}
-			await transaction
-				.lpush(matchToken, ...users)
-				.expire(matchToken, 60)
-				.exec();
+async function processMatchMakerMessages(stream: Consumer) {
+	consumers.push(stream);
+	while (!abortSignal.signal.aborted) {
+		const msg = await stream.next();
+		if (!msg) {
+			continue;
 		}
-	}, 5 * 1000);
+		const data = JSON.parse(msg.string());
+		const userId = data.userId;
+		const matchDetails = data.matchDetails;
+		userId in waitingusers && (waitingusers[userId](matchDetails));
+		msg.ack();
+	}
 }
 
 export function onClientConnect(socket: Socket) {
+	let validToken = false;
 	let userId = 0;
-	console.log("Client connected");
 
 	socket.on("wait-match", async (matchToken: string) => {
 		const token = validateToken(matchToken);
@@ -70,60 +98,71 @@ export function onClientConnect(socket: Socket) {
 			socket.emit("invalid-match-token");
 			return;
 		}
-		userId = token.tokenData.userId as number;
-		waitingusers[userId] = (matchToken: string) => {
-			socket.emit("match-found", matchToken);
-		};
-		await addUserToWaitQueue(userId);
-		socket.on("exit-match", async () => {
-			const roomID = await redis.get("IN_MATCH-" + userId);
-			const tranx = redis.multi();
-			if (roomID) {
-				tranx.lrem(roomID, 1, userId);
-			}
-			await tranx
-				.del("IN_MATCH-" + userId)
-				.lrem(queueName, 1, userId)
-				.srem(queueSetName, userId)
-				.exec();
-			socket.emit("exit-successful");
-		});
 
-		socket.on("cancel-match-search", async () => {
-			await redis
-				.multi()
-				.lrem(queueName, 1, userId)
-				.srem(queueSetName, userId)
-				.exec();
-		});
+		validToken = true;
+		userId = token.tokenData.userId as number;
+		const matchKey = token.tokenData.matchKey as string;
+
+		const userStatusJson = await redis.get(`STATUS_${userId}`);
+		const userStatus = JSON.parse(userStatusJson ?? "{}");
+		if (
+			userStatus &&
+			userStatus.status &&
+			userStatus.status == "MATCHING"
+		) {
+			socket.emit("in-matching");
+			return;
+		}
+
+		await addUserToWaitQueue(userId, matchKey);
+
+		waitingusers[userId] = (matchDetails: any) => {
+			socket.emit("match-found", matchDetails);
+			delete waitingusers[userId];
+		};
+	});
+
+	socket.on("exit-match", async () => {
+		socket.emit("exit-successful");
+	});
+
+	socket.on("cancel-match-search", async () => {
+		if (!userId) return;
+		await removeUserFromMatch(userId);
 	});
 
 	socket.on("disconnect", async () => {
+		await cleanupUserDataAfterDisconnect(userId);
 		delete waitingusers[userId];
-		await redis
-			.multi()
-			.del(`IN_MATCH-${userId}`)
-			.lrem(queueName, 1, userId)
-			.srem(queueSetName, userId)
-			.exec();
 	});
 }
 
-async function addUserToWaitQueue(userId: number): Promise<boolean> {
-	if (
-		(await redis.sismember(queueSetName, userId)) ||
-		(await redis.get(`IN_MATCH-${userId}`))
-	) {
-		return false;
-	}
+async function cleanupUserDataAfterDisconnect(userId: number) {
+	const userStatus = await redis.get(`STATUS_${userId}`);
+	if (!userStatus) return;
+	const userData = JSON.parse(userStatus);
+	if (userData.status != "MATCHING") return;
 	await redis
 		.multi()
-		.rpush(queueName, userId)
-		.sadd(queueSetName, userId)
+		.lrem(userData.bucketKey, 1, userId)
+		.del(`STATUS_${userId}`)
 		.exec();
-	return true;
 }
 
-function generateMatchToken() {
-	return "Match-Token-1";
+async function removeUserFromMatch(id: number) {
+	await jetstream.publish(
+		"match-maker.waiting-queue.delete",
+		stringCodec.encode(id.toString())
+	);
+}
+
+async function addUserToWaitQueue(
+	userId: number,
+	matchKey: string
+): Promise<boolean> {
+	const payload = stringCodec.encode(
+		JSON.stringify({ userId, matchKey, instanceId })
+	);
+	await jetstream.publish("match-maker.waiting-queue.add", payload);
+	return true;
 }

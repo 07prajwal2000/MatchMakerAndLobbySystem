@@ -16,7 +16,7 @@ function App() {
 	const [connected, setConnected] = useState(false);
 	const [matchStatus, setMatchSearchStatus] =
 		useState<MatchSearchStatus>("NOT STARTED");
-	const disableFields = (matchStatus != "FINDING") && !connected;
+	const disableFields = matchStatus != "FINDING" && !connected;
 	const [region, setRegion] = useState("AS");
 	const [skill, setSkill] = useState("1-2");
 	const [matchType, setMatchType] = useState("4P-R-TANK");
@@ -33,6 +33,11 @@ function App() {
 		});
 
 		clientSock.on("invalid-match-token", () => {
+			setMatchSearchStatus("NOT STARTED");
+		});
+
+		clientSock.on("in-matching", () => {
+			alert("Already Finding a match");
 			setMatchSearchStatus("NOT STARTED");
 		});
 
@@ -56,26 +61,24 @@ function App() {
 
 	async function onFindMatchBtnClicked() {
 		try {
-			setMatchSearchStatus("FINDING")
+			setMatchSearchStatus("FINDING");
 			const response = await axios.post(
-				`http://localhost:${PORT}/generate-token`,{
+				`http://localhost:${PORT}/generate-token`,
+				{
 					region,
 					skillRange: skill,
-					matchType
+					matchType,
 				}
 			);
 			const token = response.data.token as string;
-			console.log("Token:", response.data);
 			clientSock.emit("wait-match", token);
 		} catch (error: AxiosError | any) {
-			console.error(isAxiosError(error) && "Error message: " + error.response?.data.message);
+			console.error(
+				isAxiosError(error) &&
+					"Error message: " + error.response?.data.message
+			);
 			setMatchSearchStatus("NOT STARTED");
 		}
-		console.log({
-			region,
-			skillRange: skill,
-			matchType
-		});
 	}
 
 	async function onExitMatchClicked() {
@@ -104,7 +107,7 @@ function App() {
 						className="form-select w-auto"
 						id="region"
 						disabled={disableFields}
-						onChange={e => setRegion(e.target.value)}
+						onChange={(e) => setRegion(e.target.value)}
 						value={region}
 					>
 						<option value="AS">Asia</option>
@@ -121,7 +124,7 @@ function App() {
 						id="skill"
 						className="form-select w-auto"
 						disabled={disableFields}
-						onChange={e => setSkill(e.target.value)}
+						onChange={(e) => setSkill(e.target.value)}
 						value={skill}
 					>
 						<option value="0-2">0-2</option>
@@ -138,7 +141,7 @@ function App() {
 						id="match-type"
 						className="form-select w-auto"
 						disabled={disableFields}
-						onChange={e => setMatchType(e.target.value)}
+						onChange={(e) => setMatchType(e.target.value)}
 						value={matchType}
 					>
 						<option value="4P-R-TANK">Ranked Tank</option>

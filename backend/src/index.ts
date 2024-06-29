@@ -4,10 +4,8 @@ import tokenRouter from "./routes/token";
 import {createServer} from 'node:http';
 import {Server} from 'socket.io';
 import { initMatchmaker, onClientConnect } from "./routes/matchmaker";
-import { initRedis } from "./lib/redis";
 
 async function main() {
-  await initRedis();
   await initMatchmaker();
   const PORT = process.env.PORT ?? 3000;
   const app = express();

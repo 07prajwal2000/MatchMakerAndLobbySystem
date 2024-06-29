@@ -5,7 +5,6 @@ import { GenerateTokenRequest, generateTokenRequestSchema } from '../schemas/tok
 
 const tokenRouter = express.Router();
 
-
 tokenRouter.post("/generate-token", bodyparser.json(), (req: Request<any, any, GenerateTokenRequest>, res) => {
   const parser = generateTokenRequestSchema.safeParse(req.body);
   if (!parser.success) {
