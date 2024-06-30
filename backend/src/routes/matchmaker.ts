@@ -12,11 +12,15 @@ import {
 } from "nats";
 import Redis from "ioredis";
 
+const natsUrl = process.env.NATS_URL || "localhost:4222";
+const redisUrl = `${process.env.REDIS_HOST || 'localhost'}`;
+const redisPort = parseInt(process.env.REDIS_PORT || "6379");
+console.log("Redis URL: Port", redisUrl, ":", redisPort);
 const waitingusers: { [userId: number]: (matchDetails: any) => void } = {};
 let initialized = false;
 let natsClient: NatsConnection = null!;
 let jetstream: JetStreamClient = null!;
-const redis = new Redis();
+const redis = new Redis(redisPort, redisUrl);
 const instanceId = crypto.randomUUID().substring(0, 15).replaceAll("-", "");
 const abortSignal = new AbortController();
 const consumers: Consumer[] = [];
@@ -47,7 +51,7 @@ export async function initMatchmaker() {
 	}
 	console.log("Match maker started. Instance ID:", instanceId);
 	await redis.ping();
-	natsClient = await connect({ servers: ["localhost:4222"] });
+	natsClient = await connect({ servers: [natsUrl] });
 	jetstream = natsClient.jetstream();
 	const manager = await jetstream.jetstreamManager();
 

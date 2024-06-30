@@ -2,7 +2,7 @@ import axios, { AxiosError, isAxiosError } from "axios";
 import { useEffect, useState } from "react";
 import { io } from "socket.io-client";
 
-const PORT = 3000;
+const PORT = 8000;
 
 const clientSock = io(`http://localhost:${PORT}`, {
 	autoConnect: false,

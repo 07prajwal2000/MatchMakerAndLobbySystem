@@ -1,4 +1,5 @@
 import { Redis } from "ioredis";
+import "dotenv/config";
 import {
 	AckPolicy,
 	Consumer,
@@ -9,7 +10,11 @@ import {
 } from "nats";
 import { RedisLock } from "./lib/RedisLock";
 
-const redis = new Redis();
+const natsUrl = process.env.NATS_URL || "localhost:4222";
+const redisUrl = `${process.env.REDIS_HOST || 'localhost'}`;
+const redisPort = parseInt(process.env.REDIS_PORT || "6379");
+
+const redis = new Redis(redisPort, redisUrl);
 let natsClient: NatsConnection = null!;
 const abortSignal = new AbortController();
 let jetstream: JetStreamClient = null!;
@@ -31,7 +36,7 @@ abortSignal.signal.addEventListener(
 );
 
 (async () => {
-	natsClient = await connect({ servers: ["localhost:4222"] });
+	natsClient = await connect({ servers: [natsUrl] });
 	jetstream = natsClient.jetstream();
 	const manager = await jetstream.jetstreamManager();
 	console.log("Match maker queue server started");

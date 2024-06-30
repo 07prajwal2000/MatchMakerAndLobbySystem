@@ -1,0 +1,99 @@
+version: "3.0"
+
+services:
+  redis:
+    container_name: redis
+    image: redis/redis-stack
+    ports:
+      - 6379:6379
+      - 8001:8001
+    networks:
+      - net
+      
+  nats:
+    container_name: nats
+    image: nats
+    ports:
+      - 4222:4222
+      - 8222:8222
+    mem_limit: 256mb
+    cpu_percent: 10
+    command: "-m 8222 -js"
+    networks:
+      - net
+    
+  backend1:
+    container_name: backend1
+    image: node:20.15.0-alpine
+    working_dir: "/app"
+    environment:
+      - "NATS_URL=nats:4222"
+      - "REDIS_HOST=redis"
+      - "REDIS_PORT=6379"
+    entrypoint: ["sh", "entrypoint.sh"]
+    volumes:
+      - "../../backend:/app"
+    networks:
+      - net
+    depends_on:
+      - nats
+      - redis
+  frontend:
+    container_name: backend1
+    image: node:20.15.0-alpine
+    working_dir: "/app"
+    entrypoint: ["sh", "entrypoint.sh"]
+    volumes:
+      - "../../frontend:/app"
+    ports:
+      - 5173:5173
+
+  backend2:
+    container_name: backend2
+    image: node:20.15.0-alpine
+    working_dir: "/app"
+    environment:
+      - "NATS_URL=nats:4222"
+      - "REDIS_HOST=redis"
+      - "REDIS_PORT=6379"
+    entrypoint: ["sh", "entrypoint.sh"]
+    volumes:
+      - "../../backend:/app"
+    networks:
+      - net
+    depends_on:
+      - nats
+      - redis
+
+  stream_processor:
+    container_name: streamprocessor
+    image: node:20.15.0-alpine
+    working_dir: "/app"
+    environment:
+      - "NATS_URL=nats:4222"
+      - "REDIS_HOST=redis"
+      - "REDIS_PORT=6379"
+    entrypoint: ["sh", "entrypoint.mm.sh"]
+    volumes:
+      - "../../backend:/app"
+    networks:
+      - net
+    depends_on:
+      - nats
+      - redis
+      - backend1
+      - backend2
+
+  caddy_server:
+    image: caddy
+    container_name: caddy_proxy
+    ports:
+      - 8000:8000
+    volumes:
+      - "../Caddyfile:/etc/caddy/Caddyfile"
+    networks:
+      - net
+
+networks:
+  net:
+    driver: bridge
