@@ -12,7 +12,7 @@ There are 2 projects coupled in [backend folder](/backend/). One is Websocket la
 
 ## TODO:
 
--   [x] Fully functional Distributed Match-maker cluster.
+-   [x] Fully functional Distributed Match-maker application.
 -   [ ] Clean code (under beta stage).
 -   [ ] Container orchestractor with token generator.
 -   [ ] Lobby System.
